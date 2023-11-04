@@ -1,3 +1,5 @@
+[![tests](https://github.com/keshiba/akka-http-realworld/actions/workflows/tests.yml/badge.svg)](https://github.com/keshiba/akka-http-realworld/actions/workflows/tests.yml)
+
 # ![RealWorld Example App](logo.png)
 
 > ### Akka HTTP codebase containing real world examples (CRUD, auth, advanced patterns, etc) that adheres to the [RealWorld](https://github.com/gothinkster/realworld) spec and API.
