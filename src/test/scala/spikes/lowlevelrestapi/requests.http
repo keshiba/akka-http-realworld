@@ -1,0 +1,15 @@
+### Get all guitars
+GET http://localhost:8093/api/guitar
+Accept: application/json
+
+
+### Add a guitar
+POST http://localhost:8093/api/guitar
+Content-Type: application/json
+
+{
+  "make": "Havana",
+  "model": "TheCheapoOne"
+}
+
+###
