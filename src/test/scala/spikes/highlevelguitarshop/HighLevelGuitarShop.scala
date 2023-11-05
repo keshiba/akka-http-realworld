@@ -1,21 +1,22 @@
 package spikes.highlevelguitarshop
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
+import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.Uri.Query
-import akka.http.scaladsl.model._
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import akka.http.scaladsl.model.{
+  ContentTypes,
+  HttpEntity,
+  HttpResponse,
+  StatusCodes
+}
+import akka.http.scaladsl.server.Directives._
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import spikes.lowlevelrestapi.GuitarDB.{
-  AddGuitar,
-  FindAllGuitars,
-  FindGuitarById,
-  GuitarAdded
-}
+import spikes.lowlevelrestapi.LowLevelRestApi.requestHandlers
 import spray.json._
 
-import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 
 case class Guitar(make: String, model: String)
@@ -51,18 +52,22 @@ class GuitarDB extends Actor with ActorLogging {
   }
 }
 
-trait GuitarStoreJsonProtocol extends DefaultJsonProtocol {
+trait GuitarStoreJsonProtocol
+    extends DefaultJsonProtocol
+    with SprayJsonSupport {
 
   implicit val guitarFormat: RootJsonFormat[Guitar] = jsonFormat2(Guitar)
 }
 
 object HighLevelGuitarShop extends App with GuitarStoreJsonProtocol {
   implicit val system: ActorSystem = ActorSystem(
-    "low-level-rest-api-actor-system"
+    "high-level-guitarshop-actor-system"
   )
   implicit val materializer: ActorMaterializer = ActorMaterializer()
-  import system.dispatcher
   implicit val timeout: Timeout = Timeout(5.seconds)
+
+  import GuitarDB._
+  import system.dispatcher
 
   val guitarDB = system.actorOf(Props[GuitarDB], "GuitarDB")
   List(
@@ -73,70 +78,52 @@ object HighLevelGuitarShop extends App with GuitarStoreJsonProtocol {
     guitarDB ! AddGuitar(guitar)
   }
 
-  val requestHandlers: HttpRequest => Future[HttpResponse] = {
-    case HttpRequest(HttpMethods.GET, uri @ Uri.Path("/api/guitar"), _, _, _)
-        if uri.query().isEmpty =>
-      getAllGuitars
-    case HttpRequest(HttpMethods.GET, uri @ Uri.Path("/api/guitar"), _, _, _) =>
-      getGuitarByQuery(uri.query())
-    case HttpRequest(HttpMethods.POST, Uri.Path("/api/guitar"), _, entity, _) =>
-      entity.toStrict(5.seconds).flatMap { strictEntity =>
-        val guitar =
-          strictEntity.data.utf8String.parseJson.convertTo[Guitar]
-        val creationFuture =
-          (guitarDB ? AddGuitar(guitar)).mapTo[GuitarAdded]
-        creationFuture.map { _ =>
-          HttpResponse(StatusCodes.OK)
-        }
-      }
-    case request: HttpRequest =>
-      request.discardEntityBytes()
-      Future(HttpResponse(status = StatusCodes.NotFound))
-  }
+  def toHttpResponse(json: String): HttpResponse =
+    HttpResponse(entity = HttpEntity(ContentTypes.`application/json`, json))
 
-  private def getGuitarByQuery(query: Query): Future[HttpResponse] = {
-    val guitarId = query.get("id").map(_.toInt)
-
-    guitarId match {
-      case None =>
-        Future(HttpResponse(StatusCodes.NotFound))
-      case Some(id: Int) =>
-        val guitarFuture = (guitarDB ? FindGuitarById(id)).mapTo[Option[Guitar]]
-        guitarFuture.flatMap {
+  // GET /api/guitar?id=<id>
+  val getGuitarByIdRoute = (get & parameter("id".as[Int])) { (id: Int) =>
+    complete(
+      (guitarDB ? FindGuitarById(id))
+        .mapTo[Option[Guitar]]
+        .map {
           case Some(guitar) =>
-            Future(
-              HttpResponse(
-                entity = HttpEntity(
-                  ContentTypes.`application/json`,
-                  guitar.toJson.prettyPrint
-                )
-              )
-            )
+            toHttpResponse(guitar.toJson.prettyPrint)
           case None =>
-            Future(HttpResponse(StatusCodes.NotFound))
+            HttpResponse(StatusCodes.NotFound)
         }
-    }
+    )
   }
 
-  private def getAllGuitars = {
-    val guitarsFuture: Future[List[Guitar]] =
-      (guitarDB ? FindAllGuitars).mapTo[List[Guitar]]
+  // POST /api/guitar
+  val addGuitarRoute = (post & entity(as[Guitar])) { (guitar: Guitar) =>
+    complete(
+      (guitarDB ? AddGuitar(guitar))
+        .map(_ => HttpResponse(StatusCodes.OK))
+    )
+  }
 
-    guitarsFuture.flatMap { guitars =>
-      Future(
-        HttpResponse(
-          entity = HttpEntity(
-            ContentTypes.`application/json`,
-            guitars.toJson.prettyPrint
-          )
-        )
-      )
-    }
+  // GET /api/guitar
+  val getAllGuitars = pathEndOrSingleSlash {
+    complete(
+      (guitarDB ? FindAllGuitars)
+        .mapTo[List[Guitar]]
+        .map(_.toJson.prettyPrint)
+        .map(toHttpResponse)
+    )
+  }
+
+  val route = pathPrefix("api" / "guitar") {
+    concat(
+      getGuitarByIdRoute,
+      addGuitarRoute,
+      getAllGuitars
+    )
   }
 
   Http()
-    .newServerAt("localhost", 8093)
-    .bind(requestHandlers)
+    .newServerAt("localhost", 8095)
+    .bind(route)
     .map { binding =>
       system.log.info(
         "Listening on http://{}:{}",

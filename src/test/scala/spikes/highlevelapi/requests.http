@@ -1,0 +1,69 @@
+### Get home
+GET http://localhost:8094/
+Accept: application/json
+
+> {%
+ client.test("Requests home", function() {
+     client.assert(response.status === 200, "Response status is not 200")
+ })
+ %}
+
+### POST home fails
+POST http://localhost:8094/
+Accept: application/json
+
+> {%
+    client.test("POSTs home", function() {
+        client.assert(response.status === 405, "Response status is not 405")
+    })
+%}
+
+### Get keyboards
+GET http://localhost:8094/api/keyboards
+Accept: application/json
+
+> {%
+    client.test("GET keyboard", function() {
+        client.assert(response.status === 200, "Response status is not 200")
+    })
+%}
+
+### Path Extraction
+GET http://localhost:8094/api/keyboards/24
+Accept: application/json
+
+> {%
+    client.test("Fetch keyboard by id", function() {
+        client.assert(response.status === 200, "Response status is not 200")
+    })
+%}
+
+### Query Param Extraction
+GET http://localhost:8094/api/keyboard?id=49
+Accept: application/json
+
+> {%
+    client.test("Fetch keyboard by id query param", function() {
+        client.assert(response.status === 200, "Response status is not 200")
+    })
+%}
+
+### Get all fleaboards
+GET http://localhost:8094/api/fleaboards
+Accept: application/json
+
+> {%
+    client.test("Fetch all fleaboards", function() {
+        client.assert(response.status === 200, "Response status is not 200")
+    })
+%}
+
+### Get fleaboards by name
+GET http://localhost:8094/api/fleaboards?name=tinyflea
+Accept: application/json
+
+> {%
+    client.test("Fetch fleaboard by name", function() {
+        client.assert(response.status === 200, "Response status is not 200")
+    })
+%}
