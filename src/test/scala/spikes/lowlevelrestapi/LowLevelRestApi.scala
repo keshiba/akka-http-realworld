@@ -2,11 +2,17 @@ package spikes.lowlevelrestapi
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.Uri.Query
 import akka.http.scaladsl.model._
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import spikes.lowlevelrestapi.GuitarDB.{AddGuitar, FindAllGuitars, GuitarAdded}
+import spikes.lowlevelrestapi.GuitarDB.{
+  AddGuitar,
+  FindAllGuitars,
+  FindGuitarById,
+  GuitarAdded
+}
 import spray.json._
 
 import scala.concurrent.Future
@@ -68,18 +74,11 @@ object LowLevelRestApi extends App with GuitarStoreJsonProtocol {
   }
 
   val requestHandlers: HttpRequest => Future[HttpResponse] = {
-    case HttpRequest(HttpMethods.GET, Uri.Path("/api/guitar"), _, _, _) =>
-      val guitarsFuture: Future[List[Guitar]] =
-        (guitarDB ? FindAllGuitars).mapTo[List[Guitar]]
-
-      guitarsFuture.map { guitars =>
-        HttpResponse(
-          entity = HttpEntity(
-            ContentTypes.`application/json`,
-            guitars.toJson.prettyPrint
-          )
-        )
-      }
+    case HttpRequest(HttpMethods.GET, uri @ Uri.Path("/api/guitar"), _, _, _)
+        if uri.query().isEmpty =>
+      getAllGuitars
+    case HttpRequest(HttpMethods.GET, uri @ Uri.Path("/api/guitar"), _, _, _) =>
+      getGuitarByQuery(uri.query())
     case HttpRequest(HttpMethods.POST, Uri.Path("/api/guitar"), _, entity, _) =>
       entity.toStrict(5.seconds).flatMap { strictEntity =>
         val guitar =
@@ -93,6 +92,46 @@ object LowLevelRestApi extends App with GuitarStoreJsonProtocol {
     case request: HttpRequest =>
       request.discardEntityBytes()
       Future(HttpResponse(status = StatusCodes.NotFound))
+  }
+
+  private def getGuitarByQuery(query: Query): Future[HttpResponse] = {
+    val guitarId = query.get("id").map(_.toInt)
+
+    guitarId match {
+      case None =>
+        Future(HttpResponse(StatusCodes.NotFound))
+      case Some(id: Int) =>
+        val guitarFuture = (guitarDB ? FindGuitarById(id)).mapTo[Option[Guitar]]
+        guitarFuture.flatMap {
+          case Some(guitar) =>
+            Future(
+              HttpResponse(
+                entity = HttpEntity(
+                  ContentTypes.`application/json`,
+                  guitar.toJson.prettyPrint
+                )
+              )
+            )
+          case None =>
+            Future(HttpResponse(StatusCodes.NotFound))
+        }
+    }
+  }
+
+  private def getAllGuitars = {
+    val guitarsFuture: Future[List[Guitar]] =
+      (guitarDB ? FindAllGuitars).mapTo[List[Guitar]]
+
+    guitarsFuture.flatMap { guitars =>
+      Future(
+        HttpResponse(
+          entity = HttpEntity(
+            ContentTypes.`application/json`,
+            guitars.toJson.prettyPrint
+          )
+        )
+      )
+    }
   }
 
   Http()
